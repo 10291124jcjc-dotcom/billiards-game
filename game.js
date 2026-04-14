@@ -66,6 +66,10 @@ let shotInProgress = false;
 let pocketedThisTurn = false;
 let cueFoul = false;
 let gameOver = false;
+let cueFlash = 0;
+let cueDirection = { x: 1, y: 0 };
+let lastShotPower = 0;
+let pocketEffects = [];
 
 function createBall(x, y, radius, color, label, isCue = false) {
   return {
@@ -125,6 +129,10 @@ function resetGame() {
   pocketedThisTurn = false;
   cueFoul = false;
   gameOver = false;
+  cueFlash = 0;
+  cueDirection = { x: 1, y: 0 };
+  lastShotPower = 0;
+  pocketEffects = [];
   rackBalls();
   updateScoreboard();
   setStatus("玩家 1 回合：按住白球后方拖动，松开即可出杆。");
@@ -211,6 +219,17 @@ function clampShot(dx, dy) {
   };
 }
 
+function spawnPocketEffect(ball, pocket, isCueBall) {
+  pocketEffects.push({
+    x: pocket.x,
+    y: pocket.y,
+    color: isCueBall ? "255,255,255" : hexToRgb(ball.color),
+    life: 1,
+    ring: ball.radius + 6,
+    sparkleCount: isCueBall ? 8 : 14,
+  });
+}
+
 function shoot() {
   if (!aiming || !aimPointer || gameOver) {
     return;
@@ -229,6 +248,9 @@ function shoot() {
 
   cueBall.vx = impulse.x;
   cueBall.vy = impulse.y;
+  cueDirection = normalizeVector(impulse.x, impulse.y);
+  cueFlash = 1;
+  lastShotPower = impulse.power;
   aiming = false;
   aimPointer = null;
   shotInProgress = true;
@@ -237,14 +259,15 @@ function shoot() {
   setStatus(`玩家 ${currentPlayer + 1} 出杆中...`);
 }
 
-function isInPocket(ball) {
-  return pockets.some((pocket) => Math.hypot(ball.x - pocket.x, ball.y - pocket.y) <= table.pocketRadius - 2);
+function findPocket(ball) {
+  return pockets.find((pocket) => Math.hypot(ball.x - pocket.x, ball.y - pocket.y) <= table.pocketRadius - 2);
 }
 
-function applyPocket(ball) {
+function applyPocket(ball, pocket) {
   ball.vx = 0;
   ball.vy = 0;
   ball.active = false;
+  spawnPocketEffect(ball, pocket, ball.isCue);
 
   if (ball.isCue) {
     cueFoul = true;
@@ -254,7 +277,9 @@ function applyPocket(ball) {
 
   scores[currentPlayer] += 1;
   pocketedThisTurn = true;
+  cueFlash = 1;
   updateScoreboard();
+  setStatus(`玩家 ${currentPlayer + 1} 进球得分，球杆闪光。`);
 }
 
 function isNearTopOpening(ball) {
@@ -286,8 +311,9 @@ function updateBall(ball) {
     ball.vy = 0;
   }
 
-  if (isInPocket(ball)) {
-    applyPocket(ball);
+  const pocket = findPocket(ball);
+  if (pocket) {
+    applyPocket(ball, pocket);
     return;
   }
 
@@ -351,7 +377,20 @@ function resolveCollision(a, b) {
   b.vy += impulse * ny;
 }
 
+function updateEffects() {
+  cueFlash = Math.max(0, cueFlash - 0.05);
+  pocketEffects = pocketEffects
+    .map((effect) => ({
+      ...effect,
+      life: effect.life - 0.03,
+      ring: effect.ring + 2.6,
+    }))
+    .filter((effect) => effect.life > 0);
+}
+
 function updatePhysics() {
+  updateEffects();
+
   for (const ball of balls) {
     updateBall(ball);
   }
@@ -396,6 +435,14 @@ function drawTable() {
   roundRect(ctx, table.x, table.y, table.width, table.height, 20);
   ctx.fill();
 
+  const shine = ctx.createLinearGradient(table.x, table.y, table.x + table.width, table.y + table.height);
+  shine.addColorStop(0, "rgba(255,255,255,0.08)");
+  shine.addColorStop(0.4, "rgba(255,255,255,0)");
+  shine.addColorStop(1, "rgba(0,0,0,0.12)");
+  ctx.fillStyle = shine;
+  roundRect(ctx, table.x, table.y, table.width, table.height, 20);
+  ctx.fill();
+
   ctx.strokeStyle = "rgba(255,255,255,0.1)";
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -408,10 +455,44 @@ function drawTable() {
   ctx.stroke();
 
   for (const pocket of pockets) {
+    const glow = ctx.createRadialGradient(pocket.x, pocket.y, 2, pocket.x, pocket.y, table.pocketRadius + 14);
+    glow.addColorStop(0, "rgba(255,230,150,0.25)");
+    glow.addColorStop(1, "rgba(8,18,15,0)");
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(pocket.x, pocket.y, table.pocketRadius + 14, 0, Math.PI * 2);
+    ctx.fill();
+
     ctx.fillStyle = "#08120f";
     ctx.beginPath();
     ctx.arc(pocket.x, pocket.y, table.pocketRadius, 0, Math.PI * 2);
     ctx.fill();
+  }
+}
+
+function drawPocketEffects() {
+  for (const effect of pocketEffects) {
+    ctx.save();
+    ctx.strokeStyle = `rgba(${effect.color}, ${effect.life * 0.9})`;
+    ctx.lineWidth = 3 + effect.life * 4;
+    ctx.beginPath();
+    ctx.arc(effect.x, effect.y, effect.ring, 0, Math.PI * 2);
+    ctx.stroke();
+
+    for (let i = 0; i < effect.sparkleCount; i += 1) {
+      const angle = (Math.PI * 2 * i) / effect.sparkleCount;
+      const length = 16 + (1 - effect.life) * 32;
+      const inner = effect.ring * 0.45;
+      const outer = inner + length * effect.life;
+      ctx.strokeStyle = `rgba(${effect.color}, ${effect.life})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(effect.x + Math.cos(angle) * inner, effect.y + Math.sin(angle) * inner);
+      ctx.lineTo(effect.x + Math.cos(angle) * outer, effect.y + Math.sin(angle) * outer);
+      ctx.stroke();
+    }
+
+    ctx.restore();
   }
 }
 
@@ -452,26 +533,33 @@ function drawBall(ball) {
 }
 
 function drawCueAndGuide() {
-  if (!aiming || !aimPointer || !cueBall.active) {
+  const hasCue = (aiming && aimPointer && cueBall.active) || (cueFlash > 0.02 && cueBall.active);
+  if (!hasCue) {
     return;
   }
 
-  const dragX = cueBall.x - aimPointer.x;
-  const dragY = cueBall.y - aimPointer.y;
-  const dragLength = Math.hypot(dragX, dragY);
+  let nx = cueDirection.x;
+  let ny = cueDirection.y;
+  let power = Math.max(8, lastShotPower);
 
-  if (dragLength < 1) {
-    return;
+  if (aiming && aimPointer) {
+    const dragX = cueBall.x - aimPointer.x;
+    const dragY = cueBall.y - aimPointer.y;
+    const dragLength = Math.hypot(dragX, dragY);
+
+    if (dragLength < 1) {
+      return;
+    }
+
+    nx = dragX / dragLength;
+    ny = dragY / dragLength;
+    power = Math.min(dragLength / 6, maxShotPower);
   }
 
-  const nx = dragX / dragLength;
-  const ny = dragY / dragLength;
-  const power = Math.min(dragLength / 6, maxShotPower);
-  const aimLineLength = 160 + power * 5;
-
+  const aimLineLength = 170 + power * 5;
   ctx.save();
   ctx.setLineDash([10, 8]);
-  ctx.strokeStyle = "rgba(255,255,255,0.45)";
+  ctx.strokeStyle = `rgba(255,255,255,${aiming ? 0.5 : cueFlash * 0.55})`;
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(cueBall.x, cueBall.y);
@@ -479,31 +567,52 @@ function drawCueAndGuide() {
   ctx.stroke();
   ctx.restore();
 
-  const cueOffset = 28 + power * 1.8;
+  const flashPush = cueFlash * 28;
+  const cueOffset = 30 + power * 1.7 + flashPush;
   const cueStartX = cueBall.x - nx * cueOffset;
   const cueStartY = cueBall.y - ny * cueOffset;
-  const cueEndX = cueStartX - nx * 210;
-  const cueEndY = cueStartY - ny * 210;
+  const cueEndX = cueStartX - nx * 220;
+  const cueEndY = cueStartY - ny * 220;
 
   ctx.save();
-  ctx.lineWidth = 8;
-  ctx.strokeStyle = "#d8b37a";
+  const glowAlpha = aiming ? 0.22 : cueFlash * 0.9;
+  ctx.shadowColor = `rgba(255, 223, 130, ${glowAlpha})`;
+  ctx.shadowBlur = 12 + cueFlash * 28;
+  ctx.lineCap = "round";
+
+  const cueGradient = ctx.createLinearGradient(cueStartX, cueStartY, cueEndX, cueEndY);
+  cueGradient.addColorStop(0, "#f8e5b4");
+  cueGradient.addColorStop(0.3, "#ddb574");
+  cueGradient.addColorStop(1, "#7a522d");
+
+  ctx.strokeStyle = cueGradient;
+  ctx.lineWidth = 9;
   ctx.beginPath();
   ctx.moveTo(cueStartX, cueStartY);
   ctx.lineTo(cueEndX, cueEndY);
   ctx.stroke();
 
+  ctx.strokeStyle = "#f4f0d5";
   ctx.lineWidth = 3;
-  ctx.strokeStyle = "#6e4b2e";
   ctx.beginPath();
-  ctx.moveTo(cueEndX, cueEndY);
-  ctx.lineTo(cueEndX - nx * 40, cueEndY - ny * 40);
+  ctx.moveTo(cueStartX + nx * 8, cueStartY + ny * 8);
+  ctx.lineTo(cueStartX - nx * 16, cueStartY - ny * 16);
+  ctx.stroke();
+
+  ctx.strokeStyle = `rgba(255, 238, 180, ${cueFlash * 0.95})`;
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(cueStartX, cueStartY);
+  ctx.lineTo(cueEndX, cueEndY);
   ctx.stroke();
   ctx.restore();
 
   const meterX = table.x + 28;
   const meterY = table.y + table.height + 26;
-  ctx.fillStyle = "rgba(255, 209, 102, 0.95)";
+  const meterGradient = ctx.createLinearGradient(meterX, meterY, meterX + maxShotPower * 10, meterY);
+  meterGradient.addColorStop(0, "#ffe28a");
+  meterGradient.addColorStop(1, "#ff9466");
+  ctx.fillStyle = meterGradient;
   ctx.fillRect(meterX, meterY, power * 10, 12);
   ctx.strokeStyle = "rgba(255,255,255,0.35)";
   ctx.strokeRect(meterX, meterY, maxShotPower * 10, 12);
@@ -512,9 +621,31 @@ function drawCueAndGuide() {
 function render() {
   updatePhysics();
   drawTable();
+  drawPocketEffects();
   drawCueAndGuide();
   balls.forEach(drawBall);
   requestAnimationFrame(render);
+}
+
+function normalizeVector(x, y) {
+  const length = Math.hypot(x, y);
+  if (length === 0) {
+    return { x: 1, y: 0 };
+  }
+
+  return { x: x / length, y: y / length };
+}
+
+function hexToRgb(hexColor) {
+  const sanitized = hexColor.replace("#", "");
+  const full = sanitized.length === 3
+    ? sanitized.split("").map((char) => char + char).join("")
+    : sanitized;
+  const value = Number.parseInt(full, 16);
+  const r = (value >> 16) & 255;
+  const g = (value >> 8) & 255;
+  const b = value & 255;
+  return `${r},${g},${b}`;
 }
 
 function getPointerPosition(event) {
