@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>双人台球对战</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="layout">
+    <section class="hud">
+      <div class="title-wrap">
+        <p class="eyebrow">Local Versus</p>
+        <h1>双人台球对战</h1>
+        <p class="subtitle">拖动鼠标瞄准，松开击球。先进 4 球的一方获胜。</p>
+      </div>
+
+      <div class="scoreboard">
+        <article class="player-card active" data-player-card="0">
+          <p class="player-label">玩家 1</p>
+          <p class="player-score" data-score="0">0</p>
+        </article>
+        <article class="player-card" data-player-card="1">
+          <p class="player-label">玩家 2</p>
+          <p class="player-score" data-score="1">0</p>
+        </article>
+      </div>
+
+      <div class="status-panel">
+        <p class="status-title">当前状态</p>
+        <p class="status-text" id="statusText">玩家 1 回合：拖动白球附近区域开始瞄准。</p>
+      </div>
+
+      <div class="controls">
+        <button id="resetButton" type="button">重新开始</button>
+      </div>
+
+      <div class="rules">
+        <p>玩法说明</p>
+        <ul>
+          <li>白球入袋算失误，白球会回到开球区并切换回合。</li>
+          <li>击球后若有目标球入袋，当前玩家继续。</li>
+          <li>如果这一杆没有进球，则自动换对手出杆。</li>
+          <li>清空桌面上的目标球后，分数更高者获胜。</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="table-panel">
+      <canvas id="gameCanvas" width="1100" height="640" aria-label="双人台球游戏画布"></canvas>
+    </section>
+  </main>
+
+  <script src="game.js"></script>
+</body>
+</html>
